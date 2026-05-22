@@ -5,6 +5,15 @@
 struct OpticalFlowSnapshot {
     let pixelBuffer: CVPixelBuffer
     let vectorScale: Float
+    let sourceWidth: Int
+    let pairKey: String
+}
+
+private struct OpticalFlowInput: @unchecked Sendable {
+    let previousFrame: CVPixelBuffer
+    let currentFrame: CVPixelBuffer
+    let sourceWidth: Int
+    let pairKey: String
 }
 
 final class OpticalFlowEngine: @unchecked Sendable {
@@ -13,25 +22,43 @@ final class OpticalFlowEngine: @unchecked Sendable {
     private var isProcessing = false
     private var latestFlow: CVPixelBuffer?
     private var latestVectorScale: Float = 1
+    private var latestSourceWidth = 1
+    private var latestPairKey = ""
     private var latestFlowTime = CACurrentMediaTime()
     private var lastProcessingTime = CACurrentMediaTime()
     private let minimumProcessingInterval = 0.12
-    private let maximumFlowWidth = 960
+    private let maximumFlowWidth = 384
     private let ciContext = CIContext(options: [.cacheIntermediates: false])
 
-    func snapshotFlow(maxAge: TimeInterval) -> OpticalFlowSnapshot? {
+    func snapshotFlow(maxAge: TimeInterval, pairKey: String) -> OpticalFlowSnapshot? {
         lock.lock()
         defer { lock.unlock() }
 
         guard let latestFlow,
+              latestPairKey == pairKey,
               CACurrentMediaTime() - latestFlowTime <= maxAge else {
             return nil
         }
 
-        return OpticalFlowSnapshot(pixelBuffer: latestFlow, vectorScale: latestVectorScale)
+        return OpticalFlowSnapshot(
+            pixelBuffer: latestFlow,
+            vectorScale: latestVectorScale,
+            sourceWidth: latestSourceWidth,
+            pairKey: latestPairKey
+        )
     }
 
-    func update(previousFrame: CVPixelBuffer, currentFrame: CVPixelBuffer) {
+    func reset() {
+        lock.lock()
+        latestFlow = nil
+        latestVectorScale = 1
+        latestSourceWidth = 1
+        latestPairKey = ""
+        latestFlowTime = 0
+        lock.unlock()
+    }
+
+    func update(previousFrame: CVPixelBuffer, currentFrame: CVPixelBuffer, pairKey: String) {
         lock.lock()
         let now = CACurrentMediaTime()
         let canProcess = !isProcessing && now - lastProcessingTime >= minimumProcessingInterval
@@ -47,7 +74,12 @@ final class OpticalFlowEngine: @unchecked Sendable {
             return
         }
 
-        let sourceWidth = CVPixelBufferGetWidth(currentFrame)
+        let input = OpticalFlowInput(
+            previousFrame: previousFrame,
+            currentFrame: currentFrame,
+            sourceWidth: CVPixelBufferGetWidth(currentFrame),
+            pairKey: pairKey
+        )
 
         queue.async { [weak self] in
             guard let self else { return }
@@ -57,9 +89,9 @@ final class OpticalFlowEngine: @unchecked Sendable {
                 self.lock.unlock()
             }
 
-            let previousForFlow = self.downsample(previousFrame) ?? previousFrame
-            let currentForFlow = self.downsample(currentFrame) ?? currentFrame
-            let vectorScale = Float(sourceWidth) / Float(CVPixelBufferGetWidth(currentForFlow))
+            let previousForFlow = self.downsample(input.previousFrame) ?? input.previousFrame
+            let currentForFlow = self.downsample(input.currentFrame) ?? input.currentFrame
+            let vectorScale = Float(input.sourceWidth) / Float(CVPixelBufferGetWidth(currentForFlow))
 
             let handler = VNImageRequestHandler(cvPixelBuffer: previousForFlow, options: [:])
             let request = VNGenerateOpticalFlowRequest(targetedCVPixelBuffer: currentForFlow, options: [:])
@@ -72,6 +104,8 @@ final class OpticalFlowEngine: @unchecked Sendable {
                 self.lock.lock()
                 self.latestFlow = flow
                 self.latestVectorScale = vectorScale
+                self.latestSourceWidth = input.sourceWidth
+                self.latestPairKey = input.pairKey
                 self.latestFlowTime = CACurrentMediaTime()
                 self.lock.unlock()
             } catch {

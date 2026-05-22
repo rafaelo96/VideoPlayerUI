@@ -5,12 +5,7 @@ import AppKit
 struct LiquidPlayerApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 
-    init() {
-        LiquidPlayerApp.writeLaunchLog("LiquidPlayerApp init args=\(CommandLine.arguments.joined(separator: " "))")
-    }
-
     var body: some Scene {
-        // Hidden title bar lets the custom liquid top bar become the visible window chrome.
         WindowGroup("Liquid Player") {
             if CommandLine.arguments.count > 1 {
                 EmptyView()
@@ -18,28 +13,25 @@ struct LiquidPlayerApp: App {
             } else {
                 ContentView()
                     .frame(minWidth: 780, minHeight: 480)
+                    .onAppear {
+                        AppDelegate.bringPlayerWindowToFront()
+                    }
             }
         }
-        .windowStyle(.hiddenTitleBar)
         .windowResizability(.contentMinSize)
         .commands {
             CommandGroup(replacing: .newItem) { }
         }
     }
-
-    private static func writeLaunchLog(_ message: String) {
-        let url = URL(fileURLWithPath: "/private/tmp/LiquidPlayer-launch.log")
-        let line = "[\(Date())] \(message)\n"
-        try? line.write(to: url, atomically: true, encoding: .utf8)
-    }
 }
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
-    private var diagnosticWindow: NSWindow?
+    private var cliWindow: NSWindow?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
+        Self.bringPlayerWindowToFront()
 
         guard CommandLine.arguments.count > 1 else { return }
 
@@ -53,6 +45,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         window.center()
         window.contentView = NSHostingView(rootView: ContentView())
         window.makeKeyAndOrderFront(nil)
-        diagnosticWindow = window
+        cliWindow = window
+    }
+
+    @MainActor
+    static func bringPlayerWindowToFront() {
+        NSApp.setActivationPolicy(.regular)
+        NSApp.activate(ignoringOtherApps: true)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+            NSApp.windows.first?.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+        }
     }
 }

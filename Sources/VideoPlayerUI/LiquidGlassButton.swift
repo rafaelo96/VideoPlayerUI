@@ -24,7 +24,10 @@ struct LiquidGlassButton: View {
                     .fill(
                         isActive
                             ? AnyShapeStyle(LinearGradient(
-                                colors: [.purple.opacity(0.26), .blue.opacity(0.18)],
+                                colors: [
+                                    Color(red: 0.16, green: 0.50, blue: 0.96).opacity(0.26),
+                                    Color(red: 0.10, green: 0.34, blue: 0.86).opacity(0.18)
+                                ],
                                 startPoint: .topLeading,
                                 endPoint: .bottomTrailing
                             ))

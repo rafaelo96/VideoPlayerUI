@@ -1,19 +1,69 @@
 import SwiftUI
 import UniformTypeIdentifiers
+import AppKit
 
 struct ContentView: View {
     @StateObject private var state = PlayerState()
     @State private var isDropTargeted = false
+
+    // Control visibility and hover states for premium auto-hide behavior
+    @State private var areControlsVisible = true
+    @State private var isHoveringControls = false
+    @State private var hideControlsTask: Task<Void, Never>? = nil
+    @State private var mouseEventMonitor: Any? = nil
 
     var body: some View {
         ZStack {
             appBackdrop
 
             if state.hasVideo {
-                VideoPlayerView(player: state.player, fpsMode: state.fpsMode)
-                    .ignoresSafeArea()
-                    .overlay(videoVignette)
-                    .transition(.opacity.combined(with: .scale(scale: 1.01)))
+                Group {
+                    if state.interpolationMode == .disabled {
+                        NativeVideoPlayerView(player: state.player)
+                            .onAppear {
+                                state.currentRenderingFPS = state.displayRenderingFPS
+                                state.isArtificialInterpolationActive = false
+                                state.fluxWorkingWidth = nil
+                                state.fluxOpticalFlowUsage = 0
+                                state.fluxBlendFallbackUsage = 0
+                            }
+                    } else {
+                        VideoPlayerView(
+                            player: state.player,
+                            fpsMode: state.fpsMode,
+                            interpolationMode: state.interpolationMode,
+                            sourceFrameRate: state.sourceFrameRate
+                        ) { stats in
+                            state.currentRenderingFPS = stats.renderingFPS
+                            state.isArtificialInterpolationActive = stats.isArtificialInterpolationActive
+                            state.fluxWorkingWidth = stats.fluxWorkingWidth
+                            state.fluxOpticalFlowUsage = stats.opticalFlowUsage
+                            state.fluxBlendFallbackUsage = stats.blendFallbackUsage
+                            state.rifeStatus = stats.rifeStatus
+                            state.isRIFELoaded = stats.isRIFELoaded
+                            state.rifeEnabled = stats.isRIFELoaded && state.interpolationMode != .disabled && state.interpolationMode != .motion2Intense
+                            if !stats.isRIFELoaded && state.interpolationMode != .disabled && state.interpolationMode != .motion2Intense {
+                                state.interpolationMode = .disabled
+                                state.fpsMode = .native
+                            }
+                        }
+                    }
+                }
+                .ignoresSafeArea()
+                .overlay(videoVignette)
+                .transition(.opacity.combined(with: .scale(scale: 1.01)))
+
+                VStack {
+                    HStack {
+                        statsHUD
+                            .padding(.leading, 22)
+                            .padding(.top, 22)
+
+                        Spacer()
+                    }
+
+                    Spacer()
+                }
             }
 
             if !state.hasVideo {
@@ -29,16 +79,70 @@ struct ContentView: View {
 
                     PlayerControlsView(state: state)
                 }
-                .padding(.horizontal, 84)
+                .padding(.horizontal, 32)
                 .padding(.bottom, 34)
+                .opacity(areControlsVisible ? 1.0 : 0.0)
+                .offset(y: areControlsVisible ? 0 : 12)
+                .onHover { hovering in
+                    isHoveringControls = hovering
+                    resetHideTimer()
+                }
             }
         }
         .background(appBackdrop)
         .onDrop(of: [UTType.fileURL.identifier], isTargeted: $isDropTargeted, perform: handleDrop)
         .animation(.easeInOut(duration: 0.24), value: state.hasVideo)
         .animation(.easeInOut(duration: 0.18), value: isDropTargeted)
+        .onAppear {
+            setupMouseMonitor()
+        }
         .onDisappear {
+            cleanupMouseMonitor()
             state.cleanup()
+        }
+        .onChange(of: state.isPlaying) {
+            resetHideTimer()
+        }
+    }
+
+    private func setupMouseMonitor() {
+        mouseEventMonitor = NSEvent.addLocalMonitorForEvents(matching: [.mouseMoved, .leftMouseDown, .rightMouseDown]) { event in
+            resetHideTimer()
+            return event
+        }
+    }
+
+    private func cleanupMouseMonitor() {
+        if let monitor = mouseEventMonitor {
+            NSEvent.removeMonitor(monitor)
+            mouseEventMonitor = nil
+        }
+        hideControlsTask?.cancel()
+        hideControlsTask = nil
+        NSCursor.unhide()
+    }
+
+    private func resetHideTimer() {
+        if !areControlsVisible {
+            withAnimation(.easeInOut(duration: 0.22)) {
+                areControlsVisible = true
+            }
+            NSCursor.unhide()
+        }
+
+        hideControlsTask?.cancel()
+
+        guard state.hasVideo && state.isPlaying else { return }
+        guard !isHoveringControls else { return }
+
+        hideControlsTask = Task {
+            try? await Task.sleep(nanoseconds: 3_000_000_000)
+            guard !Task.isCancelled else { return }
+            
+            withAnimation(.easeInOut(duration: 0.32)) {
+                areControlsVisible = false
+            }
+            NSCursor.hide()
         }
     }
 
@@ -105,8 +209,8 @@ struct ContentView: View {
                         .foregroundStyle(
                             LinearGradient(
                                 colors: [
-                                    Color(red: 0.70, green: 0.62, blue: 1.0),
-                                    Color(red: 0.38, green: 0.36, blue: 1.0)
+                                    Color(red: 0.42, green: 0.70, blue: 1.0),
+                                    Color(red: 0.16, green: 0.48, blue: 0.95)
                                 ],
                                 startPoint: .top,
                                 endPoint: .bottom
@@ -130,7 +234,7 @@ struct ContentView: View {
                     if let statusMessage = state.statusMessage {
                         Text(statusMessage)
                             .font(.system(size: 14, weight: .medium))
-                            .foregroundStyle(Color(red: 0.62, green: 0.58, blue: 1.0))
+                            .foregroundStyle(Color(red: 0.40, green: 0.66, blue: 1.0))
                             .padding(.top, 4)
                     }
                 }
@@ -159,8 +263,8 @@ struct ContentView: View {
         LinearGradient(
             colors: [
                 .clear,
-                Color(red: 0.04, green: 0.05, blue: 0.18).opacity(0.26),
-                .black.opacity(0.16)
+                Color(red: 0.04, green: 0.05, blue: 0.18).opacity(0.16),
+                .black.opacity(0.08)
             ],
             startPoint: .top,
             endPoint: .bottom
@@ -168,6 +272,72 @@ struct ContentView: View {
         .frame(maxWidth: 880, maxHeight: 120)
         .blur(radius: 18)
         .allowsHitTesting(false)
+    }
+
+    private var statsHUD: some View {
+        LiquidGlassPanel(cornerRadius: 14) {
+            VStack(alignment: .leading, spacing: 5) {
+                Text("HUD")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.62))
+
+                Text("Dibujo \(String(format: "%.0f", state.displayRenderingFPS)) FPS")
+                    .font(.system(size: 12, weight: .medium))
+
+                if let sourceFrameRate = state.sourceFrameRate {
+                    Text("Fuente \(String(format: "%.2f", sourceFrameRate)) FPS")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.72))
+                }
+
+                Text("Frame⁺ \(framePlusHUDState)")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(state.interpolationMode != .disabled ? Color(red: 0.42, green: 0.70, blue: 1.0) : .white.opacity(0.68))
+
+                if state.fpsMode == .flux {
+                    Text(state.rifeStatus)
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(state.isRIFELoaded ? Color(red: 0.42, green: 0.70, blue: 1.0) : .white.opacity(0.70))
+
+                    Text("MEMC \(String(format: "%.0f", state.fluxOpticalFlowUsage * 100))%")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(state.fluxOpticalFlowUsage > 0.5 ? Color(red: 0.42, green: 0.70, blue: 1.0) : .white.opacity(0.70))
+
+                    if let fluxWorkingWidth = state.fluxWorkingWidth {
+                        Text("Interno \(fluxWorkingWidth)p")
+                            .font(.system(size: 11, weight: .regular))
+                            .foregroundStyle(.white.opacity(0.70))
+                    }
+                }
+
+                if shouldShowRIFEWarning {
+                    Text("RIFE NO INSTALADO")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(Color(red: 1.0, green: 0.58, blue: 0.34))
+                }
+
+                if let videoResolution = state.videoResolution {
+                    Text(videoResolution)
+                        .font(.system(size: 11, weight: .regular))
+                        .foregroundStyle(.white.opacity(0.70))
+                }
+            }
+            .foregroundStyle(.white.opacity(0.88))
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+        }
+        .frame(width: 148, alignment: .leading)
+        .allowsHitTesting(false)
+    }
+
+    private var framePlusHUDState: String {
+        if state.isFramePlusPreparing { return "Preparando" }
+        if state.isFramePlusPreRendered { return "60fps listo" }
+        return state.interpolationMode == .disabled ? "Desactivado" : "Activado"
+    }
+
+    private var shouldShowRIFEWarning: Bool {
+        !state.isRIFELoaded && state.interpolationMode != .disabled && state.interpolationMode != .motion2Intense
     }
 
     private func handleDrop(_ providers: [NSItemProvider]) -> Bool {
