@@ -2,18 +2,18 @@
 import PackageDescription
 
 let package = Package(
-    name: "VideoPlayerUI",
+    name: "Rift",
     platforms: [.macOS(.v14)],
     dependencies: [
         .package(url: "https://github.com/kingslay/KSPlayer", from: "2.3.4")
     ],
     targets: [
         .executableTarget(
-            name: "VideoPlayerUI",
+            name: "Rift",
             dependencies: [
                 .product(name: "KSPlayer", package: "KSPlayer")
             ],
-            path: "Sources/VideoPlayerUI",
+            path: "Sources/Rift",
             resources: [
                 .copy("Resources"),
                 .copy("FramePlusMEMC.metal")
@@ -32,9 +32,9 @@ let package = Package(
             ]
         ),
         .testTarget(
-            name: "VideoPlayerUITests",
-            dependencies: ["VideoPlayerUI"],
-            path: "Tests/VideoPlayerUITests"
+            name: "RiftTests",
+            dependencies: ["Rift"],
+            path: "Tests/RiftTests"
         )
     ]
 )

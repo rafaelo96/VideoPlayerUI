@@ -168,7 +168,7 @@ def convert(args: argparse.Namespace) -> None:
     )
 
     mlmodel.short_description = "RIFE v4.x IFNet frame interpolation"
-    mlmodel.author = "RIFE authors; converted for VideoPlayerUI"
+    mlmodel.author = "RIFE authors; converted for Rift"
     mlmodel.license = "See source checkpoint license"
     mlmodel.version = args.rife_version
     mlmodel.user_defined_metadata.update(
