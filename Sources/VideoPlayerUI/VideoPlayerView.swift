@@ -3,51 +3,12 @@ import CoreImage
 import MetalKit
 import SwiftUI
 
-struct NativeVideoPlayerView: NSViewRepresentable {
-    let player: AVPlayer
-
-    func makeNSView(context: Context) -> NativeVideoPlayerNSView {
-        let view = NativeVideoPlayerNSView()
-        view.player = player
-        return view
-    }
-
-    func updateNSView(_ view: NativeVideoPlayerNSView, context: Context) {
-        view.player = player
-    }
-}
-
-final class NativeVideoPlayerNSView: NSView {
-    var player: AVPlayer? {
-        get { playerLayer.player }
-        set {
-            playerLayer.player = newValue
-            playerLayer.videoGravity = .resizeAspect
-        }
-    }
-
-    private var playerLayer: AVPlayerLayer {
-        layer as! AVPlayerLayer
-    }
-
-    override init(frame frameRect: NSRect) {
-        super.init(frame: frameRect)
-        wantsLayer = true
-        layer = AVPlayerLayer()
-        playerLayer.backgroundColor = NSColor.black.cgColor
-        playerLayer.videoGravity = .resizeAspect
-    }
-
-    required init?(coder: NSCoder) {
-        fatalError("init(coder:) has not been implemented")
-    }
-}
-
 struct VideoPlayerView: NSViewRepresentable {
     let player: AVPlayer
     let fpsMode: FPSMode
     let interpolationMode: VideoInterpolationPipeline.InterpolationMode
     let sourceFrameRate: Double?
+    let visualEnhancementsEnabled: Bool
     var onStatsChanged: @MainActor (VideoRenderStats) -> Void = { _ in }
 
     func makeNSView(context: Context) -> MetalVideoView {
@@ -58,6 +19,7 @@ struct VideoPlayerView: NSViewRepresentable {
             fpsMode: fpsMode,
             interpolationMode: interpolationMode,
             sourceFrameRate: sourceFrameRate,
+            visualEnhancementsEnabled: visualEnhancementsEnabled,
             onStatsChanged: onStatsChanged
         )
         return view
@@ -70,6 +32,7 @@ struct VideoPlayerView: NSViewRepresentable {
             fpsMode: fpsMode,
             interpolationMode: interpolationMode,
             sourceFrameRate: sourceFrameRate,
+            visualEnhancementsEnabled: visualEnhancementsEnabled,
             onStatsChanged: onStatsChanged
         )
     }
@@ -99,8 +62,8 @@ final class MetalVideoView: MTKView {
         isPaused = true
         preferredFramesPerSecond = 60
         colorPixelFormat = .bgra8Unorm
-        clearColor = MTLClearColor(red: 0.01, green: 0.02, blue: 0.05, alpha: 1)
-        layer?.isOpaque = false
+        clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 1)
+        layer?.isOpaque = true
     }
 
     required init(coder: NSCoder) {
@@ -122,6 +85,7 @@ final class MetalVideoRenderer: NSObject, MTKViewDelegate {
     private weak var attachedItem: AVPlayerItem?
     private var fpsMode: FPSMode = .native
     private var interpolationMode: VideoInterpolationPipeline.InterpolationMode = .disabled
+    private var visualEnhancementsEnabled = false
     private var sourceFrameRate: Double?
     private var videoOutput: AVPlayerItemVideoOutput?
     private var commandQueue: MTLCommandQueue?
@@ -129,6 +93,7 @@ final class MetalVideoRenderer: NSObject, MTKViewDelegate {
     private var textureCache: CVMetalTextureCache?
     private var framePlusEngine: FramePlusMEMCEngine?
     private var framePlusOutputTexture: MTLTexture?
+    private var framePlusOutputPool: CVPixelBuffer?
     private let framePlusInFlightSemaphore = DispatchSemaphore(value: 3)
     private let frameBuffer = AsyncFrameBuffer(capacity: 6)
     private var prefetcher: FramePrefetcher?
@@ -166,7 +131,6 @@ final class MetalVideoRenderer: NSObject, MTKViewDelegate {
     private let rifeWorkingMaxWidth: CGFloat = 1920
     private let rifeWorkingMaxHeight: CGFloat = 1080
     private let memcIntensity = MEMCIntensity.high
-    private let performanceMode = MEMCPerformanceMode.balanced
     private lazy var memcKernel: CIKernel? = {
         CIKernel(source:
             """
@@ -225,6 +189,12 @@ final class MetalVideoRenderer: NSObject, MTKViewDelegate {
     nonisolated(unsafe) private var timeObserver: Any?
 
     deinit {
+        // Drain in-flight semaphore to prevent libdispatch crash on dealloc
+        // (completion handlers may not have fired yet)
+        for _ in 0..<3 {
+            framePlusInFlightSemaphore.signal()
+        }
+
         let rObs = rateObservation
         let iObs = itemObservation
         let tObserver = timeObserver
@@ -259,6 +229,7 @@ final class MetalVideoRenderer: NSObject, MTKViewDelegate {
         fpsMode: FPSMode,
         interpolationMode: VideoInterpolationPipeline.InterpolationMode,
         sourceFrameRate: Double?,
+        visualEnhancementsEnabled: Bool,
         onStatsChanged: @escaping @MainActor (VideoRenderStats) -> Void
     ) {
         if self.player !== player {
@@ -273,6 +244,7 @@ final class MetalVideoRenderer: NSObject, MTKViewDelegate {
         self.mtkView = view
         self.fpsMode = fpsMode
         self.interpolationMode = interpolationMode
+        self.visualEnhancementsEnabled = visualEnhancementsEnabled
         self.sourceFrameRate = sourceFrameRate
         self.statsHandler = onStatsChanged
         view.preferredFramesPerSecond = preferredRenderFPS(fpsMode: fpsMode, interpolationMode: interpolationMode, sourceFrameRate: sourceFrameRate)
@@ -445,7 +417,7 @@ final class MetalVideoRenderer: NSObject, MTKViewDelegate {
                 if fpsMode == .flux,
                    interpolationMode != .motion2Intense,
                    let previousFrame,
-                   sourceFrameIndex.isMultiple(of: performanceMode.flowFrameInterval) {
+                   sourceFrameIndex.isMultiple(of: 3) {
                     opticalFlowEngine.update(
                         previousFrame: previousFrame,
                         currentFrame: frame,
@@ -466,8 +438,8 @@ final class MetalVideoRenderer: NSObject, MTKViewDelegate {
         recordRenderedFrame(frame)
 
         let fittedImage = frame.needsDetailBoost
-            ? detailBoosted(aspectFill(frame.image, in: view.drawableSize))
-            : aspectFill(frame.image, in: view.drawableSize)
+            ? detailBoosted(aspectFit(frame.image, in: view.drawableSize))
+            : aspectFit(frame.image, in: view.drawableSize)
         ciContext.render(
             fittedImage,
             to: drawable.texture,
@@ -492,8 +464,9 @@ final class MetalVideoRenderer: NSObject, MTKViewDelegate {
         guard framePlusInFlightSemaphore.wait(timeout: .now() + 0.008) == .success else {
             return
         }
-        commandBuffer.addCompletedHandler { [weak self] _ in
-            self?.framePlusInFlightSemaphore.signal()
+        let sema = framePlusInFlightSemaphore
+        commandBuffer.addCompletedHandler { _ in
+            sema.signal()
         }
 
         // ═══════════════════════════════════════════════════════
@@ -568,16 +541,20 @@ final class MetalVideoRenderer: NSObject, MTKViewDelegate {
         }
 
         // ═══════════════════════════════════════════════════════
-        // 3. RENDER
+        // 3. VISUAL ENHANCEMENTS
         // ═══════════════════════════════════════════════════════
+        let displayImage = visualEnhancementsEnabled
+            ? applyVisualEnhancements(renderedImage)
+            : renderedImage
+
         recordRenderedFrame(InterpolatedImage(
-            image: renderedImage,
+            image: displayImage,
             isInterpolated: isInterpolated,
             needsDetailBoost: false,
             usedOpticalFlow: isInterpolated
         ))
 
-        let fitted = aspectFill(renderedImage, in: view.drawableSize)
+        let fitted = aspectFit(displayImage, in: view.drawableSize)
         ciContext.render(
             fitted,
             to: drawable.texture,
@@ -601,6 +578,8 @@ final class MetalVideoRenderer: NSObject, MTKViewDelegate {
         commandBuffer: MTLCommandBuffer
     ) -> CIImage? {
         guard let framePlusEngine,
+              let device = mtkView?.device,
+              let textureCache,
               CVPixelBufferGetWidth(current) == CVPixelBufferGetWidth(next),
               CVPixelBufferGetHeight(current) == CVPixelBufferGetHeight(next) else {
             return nil
@@ -610,26 +589,39 @@ final class MetalVideoRenderer: NSObject, MTKViewDelegate {
         let h = CVPixelBufferGetHeight(next)
         guard w > 0, h > 0 else { return nil }
 
-        // Reusar textura de output (solo cambia si cambia resolución)
-        if framePlusOutputTexture?.width != w || framePlusOutputTexture?.height != h {
-            let desc = MTLTextureDescriptor.texture2DDescriptor(
-                pixelFormat: .bgra8Unorm,
-                width: w,
-                height: h,
-                mipmapped: false
-            )
-            desc.usage = [.shaderRead, .shaderWrite]
-            desc.storageMode = .private
-            framePlusOutputTexture = mtkView?.device?.makeTexture(descriptor: desc)
+        // Reusar CVPixelBuffer de output (evita CIImage(mtlTexture:) que da geometría incorrecta en macOS)
+        if framePlusOutputPool == nil ||
+            CVPixelBufferGetWidth(framePlusOutputPool!) != w ||
+            CVPixelBufferGetHeight(framePlusOutputPool!) != h {
+            let attrs: [CFString: Any] = [
+                kCVPixelBufferMetalCompatibilityKey: true,
+                kCVPixelBufferIOSurfacePropertiesKey: [:],
+            ]
+            var pb: CVPixelBuffer?
+            CVPixelBufferCreate(kCFAllocatorDefault, w, h, kCVPixelFormatType_32BGRA, attrs as CFDictionary, &pb)
+            framePlusOutputPool = pb
+            framePlusOutputTexture = nil
         }
 
-        guard let framePlusOutputTexture else { return nil }
+        guard let pixelBuffer = framePlusOutputPool else { return nil }
+
+        // Crear MTLTexture desde el CVPixelBuffer vía textureCache
+        if framePlusOutputTexture == nil {
+            var texRef: CVMetalTexture?
+            CVMetalTextureCacheCreateTextureFromImage(
+                kCFAllocatorDefault, textureCache, pixelBuffer, nil,
+                .bgra8Unorm, w, h, 0, &texRef
+            )
+            framePlusOutputTexture = texRef.flatMap { CVMetalTextureGetTexture($0) }
+        }
+
+        guard let outputTexture = framePlusOutputTexture else { return nil }
 
         do {
             try framePlusEngine.encode(
                 previous: current,
                 current: next,
-                output: framePlusOutputTexture,
+                output: outputTexture,
                 commandBuffer: commandBuffer,
                 timestep: 0.5
             )
@@ -637,10 +629,7 @@ final class MetalVideoRenderer: NSObject, MTKViewDelegate {
             return nil
         }
 
-        return CIImage(
-            mtlTexture: framePlusOutputTexture,
-            options: [.colorSpace: CGColorSpaceCreateDeviceRGB()]
-        )
+        return CIImage(cvPixelBuffer: pixelBuffer)
     }
 
     private func copyFrame(from output: AVPlayerItemVideoOutput, itemTime: CMTime) -> SourceVideoFrame? {
@@ -840,7 +829,7 @@ final class MetalVideoRenderer: NSObject, MTKViewDelegate {
     private func interpolatedImage(previousImage: CIImage, currentImage: CIImage, amount: Double, pairKey: String, allowOpticalFlow: Bool) -> MEMCImage {
         if allowOpticalFlow,
            CACurrentMediaTime() >= memcDisabledUntil,
-           let flow = opticalFlowEngine.snapshotFlow(maxAge: performanceMode.maxFlowAge, pairKey: pairKey),
+            let flow = opticalFlowEngine.snapshotFlow(maxAge: 0.42, pairKey: pairKey),
            let memcImage = opticalFlowImage(previousImage: previousImage, currentImage: currentImage, flow: flow, amount: amount) {
             return MEMCImage(image: memcImage, usedOpticalFlow: true)
         }
@@ -1205,6 +1194,25 @@ final class MetalVideoRenderer: NSObject, MTKViewDelegate {
         blendFallbackFrameCount = 0
     }
 
+    private func applyVisualEnhancements(_ image: CIImage) -> CIImage {
+        var output = image
+
+        output = output
+            .applyingFilter("CIHighlightShadowAdjust", parameters: [
+                "inputHighlightAmount": 0.72,
+                "inputShadowAmount": 0.12
+            ])
+
+        output = output
+            .applyingFilter("CIColorControls", parameters: [
+                kCIInputSaturationKey: 0.96,
+                kCIInputContrastKey: 1.01
+            ])
+            .cropped(to: image.extent)
+
+        return output
+    }
+
     private func aspectFill(_ image: CIImage, in drawableSize: CGSize) -> CIImage {
         guard image.extent.width > 0,
               image.extent.height > 0,
@@ -1224,6 +1232,26 @@ final class MetalVideoRenderer: NSObject, MTKViewDelegate {
             .transformed(by: CGAffineTransform(scaleX: scale, y: scale))
             .transformed(by: CGAffineTransform(translationX: offset.x, y: offset.y))
             .cropped(to: CGRect(origin: .zero, size: drawableSize))
+    }
+
+    private func aspectFit(_ image: CIImage, in drawableSize: CGSize) -> CIImage {
+        guard image.extent.width > 0,
+              image.extent.height > 0,
+              drawableSize.width > 0,
+              drawableSize.height > 0 else {
+            return image
+        }
+
+        let scale = min(drawableSize.width / image.extent.width, drawableSize.height / image.extent.height)
+        let scaledSize = CGSize(width: image.extent.width * scale, height: image.extent.height * scale)
+        let offset = CGPoint(
+            x: (drawableSize.width - scaledSize.width) * 0.5,
+            y: (drawableSize.height - scaledSize.height) * 0.5
+        )
+
+        return image
+            .transformed(by: CGAffineTransform(scaleX: scale, y: scale))
+            .transformed(by: CGAffineTransform(translationX: offset.x, y: offset.y))
     }
 
     private func fluxInterpolationWidth(for frame: CVPixelBuffer) -> CGFloat {
@@ -1295,22 +1323,6 @@ private enum MEMCIntensity {
     var occlusionThreshold: Double {
         switch self {
         case .high: 0.50
-        }
-    }
-}
-
-private enum MEMCPerformanceMode {
-    case balanced
-
-    var flowFrameInterval: Int {
-        switch self {
-        case .balanced: 3
-        }
-    }
-
-    var maxFlowAge: TimeInterval {
-        switch self {
-        case .balanced: 0.42
         }
     }
 }

@@ -17,36 +17,24 @@ struct ContentView: View {
             appBackdrop
 
             if state.hasVideo {
-                Group {
-                    if state.interpolationMode == .disabled {
-                        NativeVideoPlayerView(player: state.player)
-                            .onAppear {
-                                state.currentRenderingFPS = state.displayRenderingFPS
-                                state.isArtificialInterpolationActive = false
-                                state.fluxWorkingWidth = nil
-                                state.fluxOpticalFlowUsage = 0
-                                state.fluxBlendFallbackUsage = 0
-                            }
-                    } else {
-                        VideoPlayerView(
-                            player: state.player,
-                            fpsMode: state.fpsMode,
-                            interpolationMode: state.interpolationMode,
-                            sourceFrameRate: state.sourceFrameRate
-                        ) { stats in
-                            state.currentRenderingFPS = stats.renderingFPS
-                            state.isArtificialInterpolationActive = stats.isArtificialInterpolationActive
-                            state.fluxWorkingWidth = stats.fluxWorkingWidth
-                            state.fluxOpticalFlowUsage = stats.opticalFlowUsage
-                            state.fluxBlendFallbackUsage = stats.blendFallbackUsage
-                            state.rifeStatus = stats.rifeStatus
-                            state.isRIFELoaded = stats.isRIFELoaded
-                            state.rifeEnabled = stats.isRIFELoaded && state.interpolationMode != .disabled && state.interpolationMode != .motion2Intense
-                            if !stats.isRIFELoaded && state.interpolationMode != .disabled && state.interpolationMode != .motion2Intense {
-                                state.interpolationMode = .disabled
-                                state.fpsMode = .native
-                            }
-                        }
+                VideoPlayerView(
+                    player: state.player,
+                    fpsMode: state.fpsMode,
+                    interpolationMode: state.interpolationMode,
+                    sourceFrameRate: state.sourceFrameRate,
+                    visualEnhancementsEnabled: state.visualEnhancementsEnabled
+                ) { stats in
+                    state.currentRenderingFPS = stats.renderingFPS
+                    state.isArtificialInterpolationActive = stats.isArtificialInterpolationActive
+                    state.fluxWorkingWidth = stats.fluxWorkingWidth
+                    state.fluxOpticalFlowUsage = stats.opticalFlowUsage
+                    state.fluxBlendFallbackUsage = stats.blendFallbackUsage
+                    state.rifeStatus = stats.rifeStatus
+                    state.isRIFELoaded = stats.isRIFELoaded
+                    state.rifeEnabled = stats.isRIFELoaded && state.interpolationMode != .disabled && state.interpolationMode != .motion2Intense
+                    if !stats.isRIFELoaded && state.interpolationMode != .disabled && state.interpolationMode != .motion2Intense {
+                        state.interpolationMode = .disabled
+                        state.fpsMode = .native
                     }
                 }
                 .ignoresSafeArea()

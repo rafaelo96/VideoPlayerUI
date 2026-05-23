@@ -31,6 +31,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
+        Self.setApplicationIcon()
         Self.bringPlayerWindowToFront()
 
         guard CommandLine.arguments.count > 1 else { return }
@@ -46,6 +47,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         window.contentView = NSHostingView(rootView: ContentView())
         window.makeKeyAndOrderFront(nil)
         cliWindow = window
+    }
+
+    @MainActor
+    static func setApplicationIcon() {
+        if let url = Bundle.main.url(forResource: "icon", withExtension: "png"),
+           let image = NSImage(contentsOf: url) {
+            NSApp.applicationIconImage = image
+        }
     }
 
     @MainActor

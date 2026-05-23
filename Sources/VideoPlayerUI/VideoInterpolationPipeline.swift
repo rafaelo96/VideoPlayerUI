@@ -32,20 +32,6 @@ actor VideoInterpolationPipeline {
         }
     }
 
-    enum QualityMode: String, CaseIterable, Sendable {
-        case performance
-        case balanced
-        case quality
-
-        var displayName: String {
-            switch self {
-            case .performance: "Performance"
-            case .balanced: "Balanced"
-            case .quality: "Quality"
-            }
-        }
-    }
-
     struct OutputFrame: @unchecked Sendable {
         let texture: MTLTexture
         let presentationTime: CMTime
@@ -60,7 +46,6 @@ actor VideoInterpolationPipeline {
     private let commandQueue: MTLCommandQueue
     private let ciContext: CIContext
     private var interpolationMode: InterpolationMode
-    private var qualityMode: QualityMode
     private var decoder: VideoDecoderEngine?
     private var playbackTask: Task<Void, Never>?
     private var streamContinuation: AsyncStream<OutputFrame>.Continuation?
@@ -78,8 +63,7 @@ actor VideoInterpolationPipeline {
         sourceURL: URL,
         rifeEngine: RIFEEngine?,
         placeboRenderer: PlaceboRenderer?,
-        interpolationMode: InterpolationMode = .rife2x,
-        qualityMode: QualityMode = .balanced
+        interpolationMode: InterpolationMode = .rife2x
     ) async throws {
         guard let device = MTLCreateSystemDefaultDevice(),
               let commandQueue = device.makeCommandQueue() else {
@@ -96,7 +80,6 @@ actor VideoInterpolationPipeline {
         self.commandQueue = commandQueue
         self.ciContext = CIContext(mtlDevice: device, options: [.cacheIntermediates: false])
         self.interpolationMode = interpolationMode
-        self.qualityMode = qualityMode
         self.decoder = try await VideoDecoderEngine(url: sourceURL)
     }
 

@@ -36,7 +36,6 @@ struct PlayerControlsView: View {
         .animation(.easeInOut(duration: 0.22), value: state.playbackRate)
         .animation(.easeInOut(duration: 0.22), value: state.fpsMode)
         .animation(.easeInOut(duration: 0.22), value: state.interpolationMode)
-        .animation(.easeInOut(duration: 0.22), value: state.qualityMode)
         .animation(.easeInOut(duration: 0.22), value: state.audioTracks.count)
     }
 
@@ -150,8 +149,8 @@ struct PlayerControlsView: View {
     private var optionsBar: some View {
         HStack(spacing: 7) {
             interpolationButton
-            qualityButton
             speedButton
+            visualButton
 
             if state.audioTracks.count > 1 {
                 audioTrackButton
@@ -180,7 +179,7 @@ struct PlayerControlsView: View {
                 state.setInterpolationMode(.motion2Intense)
             }
         } label: {
-            optionPill(
+            simplePill(
                 title: motionTitle,
                 systemName: state.isFramePlusPreparing ? "hourglass" : (state.interpolationMode == .disabled ? "plus.circle" : "plus.circle.fill"),
                 isActive: state.interpolationMode != .disabled
@@ -189,34 +188,29 @@ struct PlayerControlsView: View {
         .buttonStyle(.plain)
     }
 
-    private var qualityButton: some View {
-        Menu {
-            ForEach(VideoInterpolationPipeline.QualityMode.allCases, id: \.self) { mode in
-                Button {
-                    state.setQualityMode(mode)
-                } label: {
-                    optionMenuRow(title: mode.displayName, selected: state.qualityMode == mode)
-                }
-            }
-        } label: {
-            optionPill(
-                title: state.qualityMode.displayName,
-                systemName: "camera.filters",
-                isActive: state.placeboEnabled
-            )
-        }
-        .menuStyle(.borderlessButton)
-        .menuIndicator(.hidden)
-    }
-
     private var speedButton: some View {
         Button {
             state.cyclePlaybackRate()
         } label: {
-            optionPill(
+            simplePill(
                 title: speedTitle,
                 systemName: "speedometer",
                 isActive: state.playbackRate != 1.0
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var visualButton: some View {
+        Button {
+            withAnimation(.easeInOut(duration: 0.18)) {
+                state.visualEnhancementsEnabled.toggle()
+            }
+        } label: {
+            simplePill(
+                title: "Visual",
+                systemName: state.visualEnhancementsEnabled ? "sparkle.magnifyingglass" : "sparkle.magnifyingglass",
+                isActive: state.visualEnhancementsEnabled
             )
         }
         .buttonStyle(.plain)
@@ -296,6 +290,22 @@ struct PlayerControlsView: View {
                 .stroke(isActive ? accentColor.opacity(0.36) : .white.opacity(0.10), lineWidth: 1)
         }
         .contentShape(Capsule())
+    }
+
+    private func simplePill(title: String, systemName: String, isActive: Bool) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: systemName)
+                .font(.system(size: 12, weight: .semibold))
+                .frame(width: 14)
+
+            Text(title)
+                .font(.system(size: 11, weight: .semibold))
+                .lineLimit(1)
+                .minimumScaleFactor(0.78)
+        }
+        .foregroundStyle(isActive ? accentColor : .white.opacity(0.76))
+        .frame(height: 28)
+        .contentShape(Rectangle())
     }
 
     private func optionMenuRow(title: String, selected: Bool) -> some View {

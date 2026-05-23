@@ -34,9 +34,8 @@ final class PlayerState: ObservableObject {
     @Published var interpolationMode: VideoInterpolationPipeline.InterpolationMode = .motion2Intense
     @Published var isFramePlusPreparing = false
     @Published var isFramePlusPreRendered = false
-    @Published var qualityMode: VideoInterpolationPipeline.QualityMode = .balanced
+    @Published var visualEnhancementsEnabled = false
     @Published var rifeEnabled: Bool = false
-    @Published var placeboEnabled: Bool = true
     @Published var metrics = PlaybackMetrics()
     @Published var availableTracks: [MediaTrack] = []
     @Published var selectedAudioTrack: MediaTrack?
@@ -154,10 +153,6 @@ final class PlayerState: ObservableObject {
             isFramePlusPreparing = false
             isFramePlusPreRendered = false
         }
-    }
-
-    func setQualityMode(_ mode: VideoInterpolationPipeline.QualityMode) {
-        qualityMode = mode
     }
 
     func selectPipelineTrack(_ track: MediaTrack?) {
