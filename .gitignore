@@ -4,3 +4,4 @@
 .venv-rife/*
 .swiftpm/*
 .build-mcp/*
+.dmg
