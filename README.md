@@ -1,247 +1,249 @@
 # Rift
 
-> Reproductor de video para macOS construido con SwiftUI, AVFoundation, Metal y Core ML. Rift busca una experiencia de reproduccion fluida, visualmente cuidada y preparada para interpolacion de frames en tiempo real.
+> Reproductor de video para macOS con interfaz SwiftUI, reproduccion AVFoundation, renderizado Metal y un modo Frame+ experimental para suavizado de movimiento en tiempo real.
 
 ![Platform](https://img.shields.io/badge/platform-macOS%2014+-111827?style=for-the-badge&logo=apple&logoColor=white)
 ![Swift](https://img.shields.io/badge/Swift-6.0-F05138?style=for-the-badge&logo=swift&logoColor=white)
 ![Metal](https://img.shields.io/badge/Metal-GPU-8B5CF6?style=for-the-badge)
-![CoreML](https://img.shields.io/badge/Core%20ML-RIFE-0EA5E9?style=for-the-badge)
 
-## Vision General
+## Que es
 
-Rift es una aplicacion de escritorio para reproducir video en macOS con una interfaz moderna tipo "liquid glass" y un pipeline de renderizado pensado para aprovechar Apple Silicon. El proyecto combina reproduccion nativa con `AVPlayer`, renderizado sobre `MTKView`, interpolacion de movimiento con Metal/Vision/Core ML y conversion auxiliar con FFmpeg cuando el contenedor de video necesita compatibilidad.
+Rift es una app de escritorio para reproducir videos locales en macOS. La experiencia actual esta centrada en una UI limpia: una pantalla de apertura, video a pantalla completa, controles flotantes auto-ocultables y un instalador DMG con el gesto clasico de arrastrar la app a Aplicaciones.
 
-El objetivo no es solo abrir un archivo de video: Rift inspecciona metadata, prepara formatos complicados, muestra informacion de codecs/FPS, permite controlar audio y subtitulos, aplica mejoras visuales y puede generar frames intermedios para una sensacion de movimiento mas suave.
+La app reproduce con `AVPlayer`, toma frames mediante `AVPlayerItemVideoOutput` cuando necesita render Metal, y usa `MTKView`/Core Image/Metal para mostrar video, aplicar mejoras visuales y activar el modo `Frame+`.
 
-## Que Hace
+## UI actual
 
-| Area | Descripcion |
+Cuando no hay video cargado, Rift muestra un prompt central:
+
+- boton grande **Abrir video**;
+- soporte para arrastrar y soltar un archivo sobre la ventana;
+- mensaje de estado cuando la app esta preparando un contenedor dificil.
+
+Cuando hay video cargado, la UI visible es minima:
+
+- video como superficie principal;
+- controles flotantes en la parte inferior;
+- sin HUD de debug, sin panel de estadisticas arriba y sin lista visible de modos RIFE;
+- los controles se ocultan automaticamente durante reproduccion y vuelven con movimiento del mouse.
+
+La barra inferior contiene:
+
+- timeline con tiempo actual y duracion;
+- volumen;
+- lectura de FPS y estado de `Frame+`;
+- retroceder 10 segundos;
+- play/pause;
+- avanzar 10 segundos;
+- boton unico **Frame+** activado/desactivado;
+- boton de velocidad `1x`, `1.2x`, `1.5x`, `2x`;
+- boton **Visual** para mejoras de imagen;
+- selector de audio cuando hay mas de una pista;
+- selector de subtitulos cuando el pipeline detecta tracks disponibles.
+
+## Lo que hace realmente
+
+| Area | Estado real |
 | --- | --- |
-| Reproduccion de video | Carga archivos locales desde selector, drag and drop o argumentos de linea de comandos. |
-| Interfaz macOS | UI nativa en SwiftUI con paneles transluidos, controles auto-ocultables y atajos de reproduccion. |
-| Renderizado GPU | Presenta frames en un `MTKView` usando Metal, Core Image y texturas GPU. |
-| Interpolacion de frames | Incluye modos de interpolacion como `Motion² Intenso`, RIFE 2x, RIFE 4x y modo adaptativo. |
-| Core ML | Carga un modelo `RIFE.mlpackage`, lo compila si hace falta y ejecuta inferencia con CPU/GPU. |
-| Optical Flow | Usa Vision para estimar flujo optico y alimentar interpolacion basada en movimiento. |
-| Mejoras visuales | Aplica reduccion de ruido, sharpening, tone mapping HDR y ajuste de color via Core Image. |
-| Compatibilidad de formatos | Convierte/remuxea MKV, WebM, AVI, FLV, WMV, TS y M2TS a MP4 cuando AVFoundation lo necesita. |
-| Audio y subtitulos | Detecta pistas de audio/subtitulos, permite seleccionar pistas y evita audio duplicado con `AVAudioMix`. |
-| Benchmarks | Incluye pruebas para medir latencia RIFE por resolucion, throughput y memoria residente. |
+| Abrir videos | Selector de archivo, drag and drop, argumentos CLI y apertura desde Finder con "Abrir con". |
+| Asociacion de archivos | `Rift.app` declara formatos comunes: `mp4`, `m4v`, `mov`, `mkv`, `webm`, `avi`, `wmv`, `flv`, `ts`, `m2ts`, `mpeg`, `mpg`, `3gp`. |
+| Reproduccion | `AVPlayer` controla play/pause, seek, volumen, duracion, velocidad y sincronizacion basica. |
+| UI | SwiftUI + AppKit, panel tipo glass, controles flotantes, auto-hide y ventana macOS normal. |
+| Render normal | Si `Frame+` esta apagado, se usa `AVPlayerLayer` nativo. |
+| Render Frame+ | Si `Frame+` esta prendido, se usa `MTKView` con `AVPlayerItemVideoOutput` y frames BGRA compatibles con Metal. |
+| Frame+ | Modo MEMC experimental con compute shaders Metal: downsample, block matching, filtrado de vectores y warping. |
+| Mejoras visuales | Toggle `Visual` aplica filtros Core Image de color/detalle sobre el render Metal. |
+| Audio | Detecta pistas de audio y permite seleccionar una pista con `AVAudioMix`. |
+| Subtitulos | La UI tiene selector de subtitulos detectados, pero el render visible avanzado de subtitulos aun no esta terminado. |
+| Contenedores dificiles | Para MKV/WebM/AVI/FLV/WMV/TS/M2TS intenta remux/transcode temporal con FFmpeg si esta disponible. |
+| RIFE/Core ML | El codigo existe como motor experimental y benchmark, pero no es la experiencia principal de la UI actual. El boton visible del usuario es `Frame+`, no RIFE 2x/4x/Adaptive. |
+| DMG | `Rift.dmg` se genera con fondo claro, instruccion visual y enlace a `/Applications`. |
 
-## Tecnologias Usadas
+## Frame+
 
-### Lenguaje y Plataforma
+`Frame+` es el modo visible de suavizado de movimiento. Al activarlo:
 
-- **Swift 6.0**: lenguaje principal del proyecto.
-- **Swift Package Manager**: definicion del paquete, dependencias, recursos y tests.
-- **macOS 14+**: plataforma minima configurada en `Package.swift`.
-- **SwiftUI**: interfaz, estado, controles y composicion visual.
-- **AppKit**: integracion con ventanas, icono de app, apertura de archivos y ciclo de vida macOS.
+1. `ContentView` cambia de render nativo a `RiftPlayerView`.
+2. `RiftPlayerView` configura un `MTKView` continuo a 60 FPS.
+3. `AVPlayerItemVideoOutput` entrega frames BGRA.
+4. `FramePrefetcher` llena un buffer circular para reducir tirones por lectura de frames.
+5. El render alterna pulsos:
+   - pulso impar: frame original;
+   - pulso par: frame intermedio generado.
+6. `FramePlusMEMCEngine` ejecuta kernels Metal para estimar movimiento y warpear el frame intermedio.
+7. Si el motor no puede generar un frame, la app cae a presentar el frame disponible.
 
-### Video, Audio y Media
-
-- **AVFoundation**: reproduccion con `AVPlayer`, lectura de assets, pistas, duracion, volumen, seek y audio mix.
-- **AVAssetReader**: decodificacion frame a frame para pipelines avanzados.
-- **CoreMedia / CoreVideo**: timestamps, `CVPixelBuffer`, pools de buffers y metadata HDR.
-- **VideoToolbox**: enlazado para capacidades de video aceleradas por hardware.
-- **FFmpeg / FFprobe**: inspeccion de codecs y conversion/remux de contenedores no ideales para AVFoundation.
-- **KSPlayer**: dependencia de media declarada en el paquete para soporte del ecosistema de reproduccion.
-
-### GPU, Imagen e Interpolacion
-
-- **Metal / MetalKit**: renderizado en `MTKView`, command queues, texturas y compute pipelines.
-- **Metal Performance Shaders**: framework enlazado para trabajo GPU especializado.
-- **Core Image**: filtros, escalado, color, tone mapping y render a texturas Metal.
-- **Vision Optical Flow**: generacion de mapas de movimiento entre frames.
-- **Core ML**: carga y ejecucion de modelo RIFE para interpolacion neural.
-- **Accelerate**: soporte numerico de alto rendimiento.
-
-### Scripts y Herramientas
-
-- **Python + coremltools**: conversion de checkpoints RIFE v4.x a `.mlpackage`.
-- **PyTorch**: carga/trazado del modelo RIFE antes de exportarlo a Core ML.
-- **Swift scripts**: generacion de assets auxiliares para empaquetado DMG.
-- **XCTest**: benchmarks y pruebas de helpers PSNR/SSIM.
+Frame+ no hace pre-render de video ni exporta una copia 60 FPS. Trabaja en vivo dentro del render.
 
 ## Arquitectura
 
 ```mermaid
 flowchart LR
-    A["Usuario abre video"] --> B["PlayerState"]
-    B --> C{"Formato compatible?"}
-    C -- "Si" --> D["AVPlayerItem"]
-    C -- "No" --> E["FFmpeg remux/transcode"]
+    A["Archivo abierto"] --> B["PlayerState"]
+    B --> C{"Contenedor dificil?"}
+    C -- "No" --> D["AVPlayerItem"]
+    C -- "Si, FFmpeg disponible" --> E["MP4 temporal"]
     E --> D
-    D --> F["RiftPlayerView"]
-    F --> G["MetalVideoRenderer"]
-    G --> H["MTKView"]
-    G --> I["FramePlus / Optical Flow"]
-    G --> J["RIFECoreMLInterpolator"]
-    J --> K["RIFEEngine + Core ML"]
-    G --> L["PlaceboRenderer fallback"]
-    I --> H
-    K --> H
-    L --> H
+    D --> F{"Frame+ activo?"}
+    F -- "No" --> G["AVPlayerLayer nativo"]
+    F -- "Si" --> H["RiftPlayerView + MTKView"]
+    H --> I["AVPlayerItemVideoOutput"]
+    I --> J["FramePrefetcher + AsyncFrameBuffer"]
+    J --> K["FramePlusMEMCEngine"]
+    K --> L["FramePlusMEMC.metal"]
+    L --> M["Core Image render a drawable"]
+    G --> N["Pantalla"]
+    M --> N
 ```
 
-## Modulos Principales
+## Modulos principales
 
-| Archivo | Responsabilidad |
+| Archivo | Responsabilidad actual |
 | --- | --- |
-| `Sources/Rift/RiftApp.swift` | Punto de entrada, ciclo de vida de la app, apertura por CLI/Finder y ventana principal. |
-| `Sources/Rift/ContentView.swift` | Composicion principal de UI, drag and drop, prompt de apertura y controles flotantes. |
-| `Sources/Rift/PlayerState.swift` | Estado del reproductor, carga de videos, conversion FFmpeg, metadata, audio, tiempo y FPS. |
-| `Sources/Rift/PlayerControlsView.swift` | Barra de control: timeline, volumen, play/pause, seek, velocidad, visuales, audio y subtitulos. |
-| `Sources/Rift/RiftPlayerView.swift` | Puente SwiftUI/AppKit hacia `MTKView` y renderer Metal. |
-| `Sources/Rift/FramePipeline.swift` | Buffer lock-free y prefetcher de frames para alimentar renderizado fluido. |
-| `Sources/Rift/VideoDecoderEngine.swift` | Decodificacion frame a frame con `AVAssetReader` y lectura de pistas/media metadata. |
-| `Sources/Rift/VideoInterpolationPipeline.swift` | Pipeline asincrono de interpolacion RIFE/adaptativa y emision de frames renderizables. |
-| `Sources/Rift/RIFECoreMLInterpolator.swift` | Localiza, compila y administra el modelo RIFE bundled o definido por entorno. |
-| `Sources/Rift/RIFEEngine.swift` | Actor de inferencia Core ML, padding/cropping, pools de pixel buffers y metricas de latencia. |
-| `Sources/Rift/OpticalFlowEngine.swift` | Calculo de optical flow con Vision en cola dedicada. |
-| `Sources/Rift/FramePlusMEMCEngine.swift` | Interpolacion MEMC con compute shaders Metal. |
-| `Sources/Rift/FramePlusMEMC.metal` | Kernels GPU para downsample, estimacion de movimiento, filtrado y warp. |
-| `Sources/Rift/PlaceboRenderer.swift` | Pipeline visual de fallback: deband, sharpening, tone mapping y color management. |
+| `Sources/Rift/RiftApp.swift` | Entrada de la app, ventana principal, icono, activacion de ventana y apertura de archivos desde Finder. |
+| `Sources/Rift/ContentView.swift` | Composicion visual, prompt de apertura, drag and drop, cambio entre render nativo y render Metal, controles flotantes. |
+| `Sources/Rift/PlayerState.swift` | Estado de reproduccion, carga de videos, conversion temporal FFmpeg, metadata, audio, velocidad, timeline y modo Frame+. |
+| `Sources/Rift/PlayerControlsView.swift` | Barra inferior: tiempo, volumen, FPS, Frame+, velocidad, Visual, audio y subtitulos. |
+| `Sources/Rift/RiftPlayerView.swift` | Puente SwiftUI/AppKit a `MTKView`; render Metal, prefetch de frames, Frame+ y mejoras visuales. |
+| `Sources/Rift/FramePipeline.swift` | `SourceVideoFrame`, `AsyncFrameBuffer` y `FramePrefetcher` para alimentar Frame+. |
+| `Sources/Rift/FramePlusMEMCEngine.swift` | Servicio Metal que crea pipelines, usa `CVMetalTextureCache` y encadena los compute shaders MEMC. |
+| `Sources/Rift/FramePlusMEMC.metal` | Shaders GPU de downsample, block matching, filtrado de vectores y warping. |
+| `Sources/Rift/RIFEEngine.swift` | Actor Core ML experimental para interpolacion RIFE. No es el boton principal visible. |
+| `Sources/Rift/RIFECoreMLInterpolator.swift` | Localizacion/carga del modelo RIFE experimental. |
+| `Sources/Rift/VideoDecoderEngine.swift` | Decoder con `AVAssetReader` usado por pipelines avanzados/experimentales, no por la ruta principal de UI normal. |
+| `Sources/Rift/VideoInterpolationPipeline.swift` | Pipeline async experimental para frames interpolados. |
+| `Sources/Rift/PlaceboRenderer.swift` | Wrapper/fallback experimental de render de calidad. |
+| `scripts/make_dmg_background.swift` | Genera el fondo claro del DMG con instrucciones de instalacion. |
+| `scripts/convert_rife_v4_coreml.py` | Convierte checkpoints RIFE a Core ML para pruebas/experimentos. |
 
-## Flujo de Reproduccion
+## Flujo de reproduccion
 
-1. El usuario abre un archivo desde el selector, lo arrastra a la ventana o lo pasa como argumento.
-2. `PlayerState` reinicia estado, limpia conversiones temporales y detecta si el contenedor requiere conversion.
-3. Si el archivo es MKV/WebM/AVI/FLV/WMV/TS/M2TS, se usa FFmpeg para remux o transcode a MP4 temporal.
-4. Se inspeccionan codecs, resolucion y frame rate con FFprobe cuando esta disponible.
-5. `AVPlayer` reproduce el archivo y mantiene sincronizados tiempo, volumen, velocidad y estado.
-6. `RiftPlayerView` entrega frames al renderer Metal.
-7. El renderer decide si presenta FPS nativo, interpolacion Motion², RIFE o fallback visual.
-8. La UI recibe estadisticas de FPS, uso de optical flow, fallback e informacion del modelo RIFE.
+1. El usuario abre un archivo con el boton, drag and drop, CLI o Finder.
+2. `PlayerState.loadVideo(_:)` limpia estado anterior.
+3. Si el contenedor es MKV/WebM/AVI/FLV/WMV/TS/M2TS, se intenta preparar una copia temporal compatible con FFmpeg.
+4. Se inspeccionan codec, resolucion y FPS cuando `ffprobe` esta disponible.
+5. `AVPlayer` reproduce el asset y alimenta tiempo, duracion, volumen y velocidad.
+6. Si `Frame+` esta apagado, `ContentView` usa `NativeVideoPlayerView`.
+7. Si `Frame+` esta encendido, `ContentView` usa `RiftPlayerView` y el pipeline Metal.
+8. La barra inferior muestra FPS estimado y estado de Frame+ sin mostrar HUD de debug.
 
-## Interpolacion y FPS
+## Compatibilidad de formatos
 
-Rift tiene dos grandes caminos para mejorar la fluidez:
+Rift declara asociacion de archivos para estos formatos en el `Info.plist` del bundle:
 
-- **Motion² Intenso**: modo orientado a 60 FPS con estimacion de movimiento, optical flow y shaders Metal. Es el modo por defecto configurado en el estado del reproductor.
-- **RIFE Core ML**: interpolacion neural usando un modelo `RIFE.mlpackage`. Soporta `RIFE 2x`, `RIFE 4x` y `Adaptive`, con control de timesteps segun latencia.
+```text
+mp4, m4v, mov, mkv, webm, avi, wmv, flv, ts, m2ts, mpeg, mpg, 3gp
+```
 
-El pipeline puede degradar con gracia: si no existe modelo RIFE, si el modelo falla o si la resolucion excede el limite soportado, la app desactiva ese modo y vuelve a reproduccion nativa o al fallback disponible.
+Despues de instalar Rift en `/Applications`, macOS puede mostrarlo en **Abrir con**. Para volverlo predeterminado:
 
-## Mejoras Visuales
+1. clic derecho sobre un video;
+2. **Obtener informacion**;
+3. **Abrir con: Rift**;
+4. **Cambiar todo...**.
 
-El renderer visual aplica pases de imagen enfocados en calidad:
+## FFmpeg
 
-- ajuste de imagen al target manteniendo aspect ratio;
-- reduccion suave de ruido;
-- sharpening luminance para escaladores tipo Lanczos/Jinc;
-- tratamiento HDR con ajustes de highlights/shadows;
-- seleccion automatica de espacio de color SDR, HDR10 o Display P3.
+Rift puede reproducir MP4/MOV compatibles directamente con AVFoundation. Para contenedores como MKV o WebM, intenta usar FFmpeg si existe en el sistema.
 
-## Compatibilidad de Formatos
+La estrategia es:
 
-AVFoundation reproduce muy bien MP4/MOV y codecs compatibles con macOS. Para otros contenedores, Rift intenta preparar una copia temporal:
+- remux sin recodificar cuando video y audio son compatibles;
+- copiar video y convertir audio a AAC si solo falla el audio;
+- usar `h264_videotoolbox` cuando necesita convertir video;
+- caer a `libx264` si VideoToolbox falla.
 
-- si video y audio son compatibles, hace **remux** sin recodificar;
-- si el video es compatible pero el audio no, copia video y convierte audio a AAC;
-- si hace falta, usa **h264_videotoolbox** para conversion acelerada por hardware;
-- si falla el hardware, cae a **libx264** como opcion compatible.
-
-Formatos que disparan preparacion: `mkv`, `webm`, `avi`, `flv`, `wmv`, `ts`, `m2ts`.
-
-## Requisitos
-
-- macOS 14 o superior.
-- Xcode con toolchain Swift 6.
-- Apple Silicon recomendado para los modos de interpolacion y Core ML.
-- FFmpeg opcional, pero recomendado para contenedores como MKV/WebM:
+Instalacion recomendada:
 
 ```bash
 brew install ffmpeg
 ```
 
-## Instalacion y Ejecucion
+## Instalacion
 
-Clona el repositorio y compila la app:
+El artefacto principal es:
 
-```bash
-swift build
+```text
+Rift.dmg
 ```
 
-Ejecuta Rift desde Swift Package Manager:
+El DMG contiene:
+
+- `Rift.app`;
+- enlace a `Applications`;
+- fondo claro con la instruccion de arrastrar la app a Aplicaciones.
+
+Tambien se puede ejecutar desde SwiftPM:
 
 ```bash
 swift run Rift
 ```
 
-Tambien puedes abrir un video directamente:
+Abrir un video desde CLI:
 
 ```bash
 swift run Rift /ruta/al/video.mkv
 ```
 
-Para activar el modo Flux desde CLI:
+Forzar la ruta de 60 FPS/Flux desde CLI:
 
 ```bash
 swift run Rift --fps=60 /ruta/al/video.mp4
 ```
 
-## Modelo RIFE
+## Build
 
-Rift busca el modelo con este orden:
-
-1. variable de entorno `RIFE_MODEL_URL`;
-2. `RIFE.mlmodelc`, `RIFE.mlpackage` o `RIFE.mlmodel` dentro del bundle;
-3. el subdirectorio `Resources` del bundle.
-
-Ejemplo con modelo externo:
+Compilar release:
 
 ```bash
-RIFE_MODEL_URL=/ruta/a/RIFE.mlpackage swift run Rift /ruta/al/video.mp4
+swift build -c release
 ```
 
-El repositorio incluye un script para convertir checkpoints RIFE v4.x a Core ML:
+Actualizar el bundle manual de la app:
 
 ```bash
-python3 -m venv .venv-rife
-source .venv-rife/bin/activate
-pip install --upgrade pip
-pip install torch torchvision coremltools==7.2 pillow numpy
-PYTHONPATH=/ruta/a/rife python scripts/convert_rife_v4_coreml.py \
-  --checkpoint /ruta/a/flownet.pkl \
-  --rife-root /ruta/a/rife \
-  --output Sources/Rift/Resources/RIFE.mlpackage
+cp .build/arm64-apple-macosx/release/Rift Rift.app/Contents/MacOS/Rift
+cp -R .build/arm64-apple-macosx/release/Rift_Rift.bundle Rift.app/Contents/MacOS/
 ```
 
-## Tests y Benchmarks
-
-Ejecuta la suite base:
+Registrar la app con Launch Services:
 
 ```bash
-swift test
+/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f /ruta/a/Rift.app
 ```
 
-Ejecuta el benchmark de latencia RIFE con un modelo especifico:
+## RIFE experimental
+
+El repo conserva soporte experimental para RIFE/Core ML:
+
+- `Sources/Rift/Resources/RIFE.mlpackage`;
+- `RIFEEngine`;
+- `RIFECoreMLInterpolator`;
+- benchmark `RIFEEngineBenchmarks`.
+
+La UI actual no muestra botones separados **RIFE 2x**, **RIFE 4x** ni **Adaptive**. Esos modos quedaron como infraestructura interna/experimental; la experiencia visible del usuario se simplifico a un solo boton **Frame+**.
+
+Ejemplo de benchmark:
 
 ```bash
 RIFE_MODEL_URL=/ruta/a/RIFE.mlpackage \
 swift test --filter RIFEEngineBenchmarks/testRIFELatencyMatrix
 ```
 
-El benchmark mide resoluciones desde 360p hasta 4K e imprime p50, p95, p99, throughput, memoria residente y temperatura cuando este disponible.
-
-## Empaquetado
-
-El proyecto contiene una app ya empaquetable como `Rift.app` y un artefacto `Rift.dmg`. Tambien hay scripts auxiliares para assets de distribucion, como el fondo del DMG:
-
-```bash
-swift scripts/make_dmg_background.swift /ruta/de/salida/background.png
-```
-
-## Estructura del Repositorio
+## Estructura
 
 ```text
 .
 ├── Package.swift
-├── Package.resolved
 ├── Sources/
 │   └── Rift/
-│       ├── *.swift
+│       ├── ContentView.swift
+│       ├── PlayerState.swift
+│       ├── PlayerControlsView.swift
+│       ├── RiftApp.swift
+│       ├── RiftPlayerView.swift
+│       ├── FramePipeline.swift
+│       ├── FramePlusMEMCEngine.swift
 │       ├── FramePlusMEMC.metal
 │       └── Resources/
 │           └── RIFE.mlpackage
@@ -250,33 +252,31 @@ swift scripts/make_dmg_background.swift /ruta/de/salida/background.png
 ├── scripts/
 │   ├── convert_rife_v4_coreml.py
 │   └── make_dmg_background.swift
-├── external/
-│   └── rife-4.25-lite/
 ├── Rift.app
 └── Rift.dmg
 ```
 
-## Estado del Proyecto
+## Estado actual
 
-Rift ya cuenta con una base funcional de reproductor, UI, reproduccion local, conversion auxiliar, renderizado Metal, interpolacion experimental y benchmarks. El modelo Core ML necesario para RIFE esta incluido en `Sources/Rift/Resources/RIFE.mlpackage`, por lo que no hace falta clonar repositorios externos para ejecutar la app. Las areas con mayor potencial de evolucion son:
+Rift ya funciona como reproductor local con UI limpia, controles flotantes, modo Frame+ experimental, conversion auxiliar con FFmpeg, selector de audio y empaquetado DMG.
 
-- estabilizar y perfilar los modos RIFE en mas resoluciones;
-- ampliar soporte de subtitulos visibles en el pipeline de render;
-- mejorar la integracion de libplacebo real si se reemplaza el fallback Core Image;
-- automatizar empaquetado, firma y notarizacion;
-- agregar pruebas de UI y pruebas de reproduccion con archivos fixture.
+Pendientes reales:
 
-## Licencias y Dependencias Externas
+- mejorar estabilidad/percepcion de suavidad de Frame+ en 4K;
+- terminar render visible de subtitulos seleccionados;
+- automatizar creacion del DMG, firma y notarizacion;
+- separar mejor codigo experimental RIFE/libplacebo del camino principal;
+- agregar pruebas de UI y clips fixture para reproduccion.
 
-El proyecto usa dependencias y modelos externos que pueden tener licencias propias. Revisa especialmente:
+## Licencias y distribucion
 
-- `KSPlayer`;
-- FFmpeg y codecs enlazados o usados localmente;
-- checkpoints RIFE externos usados para regenerar el modelo Core ML;
-- frameworks incluidos dentro de `Rift.app`.
+Antes de distribuir publicamente, revisar licencias y redistribucion de:
 
-Antes de distribuir builds publicos, valida compatibilidad de licencias, atribuciones y terminos de redistribucion de modelos y librerias nativas.
+- KSPlayer;
+- FFmpeg y frameworks nativos incluidos en `Rift.app`;
+- modelos RIFE incluidos o regenerados;
+- cualquier framework empaquetado dentro del bundle.
 
 ---
 
-Hecho para explorar video fluido en macOS con una mezcla potente de SwiftUI, GPU y modelos de interpolacion.
+Rift es un reproductor macOS enfocado en una experiencia limpia y en experimentar con suavizado de movimiento en vivo sobre Metal.
