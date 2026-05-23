@@ -8,16 +8,16 @@ let image = NSImage(size: size)
 image.lockFocus()
 
 let bounds = NSRect(origin: .zero, size: size)
-NSColor(calibratedRed: 0.018, green: 0.020, blue: 0.028, alpha: 1.0).setFill()
+NSColor(calibratedRed: 0.965, green: 0.972, blue: 0.985, alpha: 1.0).setFill()
 bounds.fill()
 
 let gradient = NSGradient(colors: [
-    NSColor(calibratedRed: 0.08, green: 0.12, blue: 0.20, alpha: 0.90),
-    NSColor(calibratedRed: 0.018, green: 0.020, blue: 0.028, alpha: 1.0)
+    NSColor(calibratedRed: 0.99, green: 0.995, blue: 1.0, alpha: 1.0),
+    NSColor(calibratedRed: 0.91, green: 0.935, blue: 0.975, alpha: 1.0)
 ])!
-gradient.draw(in: bounds, angle: -28)
+gradient.draw(in: bounds, angle: -24)
 
-NSColor(calibratedWhite: 1.0, alpha: 0.055).setStroke()
+NSColor(calibratedRed: 0.18, green: 0.30, blue: 0.52, alpha: 0.22).setStroke()
 let guide = NSBezierPath()
 guide.move(to: NSPoint(x: 236, y: 214))
 guide.line(to: NSPoint(x: 484, y: 214))
@@ -37,16 +37,16 @@ func drawText(_ text: String, at point: NSPoint, size fontSize: CGFloat, weight:
     paragraph.alignment = alignment
     let attrs: [NSAttributedString.Key: Any] = [
         .font: NSFont.systemFont(ofSize: fontSize, weight: weight),
-        .foregroundColor: NSColor(calibratedWhite: 1.0, alpha: alpha),
+        .foregroundColor: NSColor(calibratedRed: 0.075, green: 0.095, blue: 0.135, alpha: alpha),
         .paragraphStyle: paragraph
     ]
     let rect = NSRect(x: point.x, y: point.y, width: 720 - point.x * 2, height: fontSize + 12)
     text.draw(in: rect, withAttributes: attrs)
 }
 
-drawText("Rift", at: NSPoint(x: 0, y: 336), size: 36, weight: .semibold, alpha: 0.98)
-drawText("Arrastra la app a Aplicaciones", at: NSPoint(x: 0, y: 292), size: 22, weight: .medium, alpha: 0.90)
-drawText("para instalar Rift en tu Mac", at: NSPoint(x: 0, y: 266), size: 14, weight: .regular, alpha: 0.58)
+drawText("Rift", at: NSPoint(x: 0, y: 336), size: 36, weight: .semibold, alpha: 0.96)
+drawText("Arrastra la app a Aplicaciones", at: NSPoint(x: 0, y: 292), size: 22, weight: .medium, alpha: 0.82)
+drawText("para instalar Rift en tu Mac", at: NSPoint(x: 0, y: 266), size: 14, weight: .regular, alpha: 0.54)
 
 image.unlockFocus()
 
